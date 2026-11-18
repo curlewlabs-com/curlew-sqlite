@@ -1,0 +1,12 @@
+{
+  "archive": {
+    "sha256": "0a9c8e34352dad46006aa82836d5383bff9dc6bc9ce5a60553c05aa30e6ad1f9",
+    "strip_prefix": "sqlite-amalgamation-3540100",
+    "url": "https://www.sqlite.org/2026/sqlite-amalgamation-3540100.zip"
+  },
+  "compile_definitions": [
+    "SQLITE_THREADSAFE=1",
+    "SQLITE_ENABLE_LOCKING_STYLE=0",
+    "HAVE_USLEEP=1"
+  ]
+}

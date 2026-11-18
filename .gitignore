@@ -1,0 +1,12 @@
+# Fetched by ios/fetch-amalgamation.sh from the pin; never committed.
+/sqlite-amalgamation-*/
+/sqlite-amalgamation-*.zip
+/vendor/
+/.bundle/
+# Gradle and CMake output, and the SDK path Android Studio writes.
+/android/.gradle/
+/android/.kotlin/
+/android/build/
+/android/curlewsqlite/build/
+/android/curlewsqlite/.cxx/
+/android/local.properties

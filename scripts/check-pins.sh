@@ -9,8 +9,9 @@
 # the archives' release number, the version floor, which that number encodes
 # (3.54.1 is 3540100), and the source ID.
 #
-# Each value is read from the one line that declares it. A file with no such
-# line, or more than one, fails rather than compares nothing.
+# The lock is read with jq. Each other value is read from the one line that
+# declares it, and a file with no such line, or more than one, fails rather
+# than compares nothing.
 set -eu
 
 cd "$(dirname "$0")/.."
@@ -32,7 +33,16 @@ one() {
     printf '%s\n' "$found"
 }
 
-amalgamation=$(one "$lock" 's/.*"strip_prefix": "sqlite-amalgamation-\([0-9]*\)".*/\1/p' "the amalgamation's release")
+# The pin is JSON, so it is read as JSON: the archive's directory, which names
+# the release, as CocoaPods' prepare_command receives it.
+prefix=$(jq -er '.archive.strip_prefix' "$lock")
+amalgamation=${prefix#sqlite-amalgamation-}
+case $amalgamation in
+'' | *[!0-9]*)
+    echo "check-pins: $lock names the archive directory $prefix, not sqlite-amalgamation-<release>" >&2
+    exit 1
+    ;;
+esac
 aar=$(one "$gradle" 's/^val sqliteAndroidUrl = ".*sqlite-android-\([0-9]*\)\.aar"$/\1/p' "the AAR's release")
 swift_floor=$(one "$swift" 's/.*minimumRuntimeVersion = "\([0-9.]*\)"$/\1/p' "the version floor")
 kotlin_floor=$(one "$kotlin" 's/.*minimumVersion = SQLiteEngineVersion(\([0-9]*\), \([0-9]*\), \([0-9]*\))$/\1.\2.\3/p' "the version floor")

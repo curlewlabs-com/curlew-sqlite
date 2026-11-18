@@ -23,7 +23,7 @@ jobs:
         # podspec does not name would publish a pod reporting another release.
         env:
           TAG: ${{ github.ref_name }}
-        run: grep -F -x "  spec.version = '${TAG#v}'" CurlewSQLite.podspec
+        run: grep -F -x "  spec.version = \"${TAG#v}\"" CurlewSQLite.podspec
 
   verify:
     needs: reviewed-source

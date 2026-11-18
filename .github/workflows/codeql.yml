@@ -1,0 +1,124 @@
+name: CodeQL
+
+# Code scanning for every language in the repository. GitHub's default setup
+# cannot build the Swift (a pod, with no Xcode project to find) or the Kotlin
+# (an Android library that needs JDK 21 and Gradle 9), so this workflow builds
+# each one the way CI does. The other languages are read from source, as
+# default setup reads them. GitHub refuses an upload from this workflow while
+# default setup is enabled, so the repository's default setup stays off.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly, as default setup schedules it, so new queries reach code that
+    # has not changed.
+    - cron: "27 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    # Named, so every step runs as `bash -eo pipefail`.
+    shell: bash
+
+concurrency:
+  group: codeql-${{ github.ref }}-${{ github.ref_name == 'main' && github.run_id || 'pr' }}
+  cancel-in-progress: ${{ github.ref_name != 'main' }}
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      # One language failing to build must not hide the others' results.
+      fail-fast: false
+      matrix:
+        include:
+          - language: actions
+            build-mode: none
+            runner: ubuntu-24.04
+          # The shims only. With no build, the analysis reads tracked files,
+          # so the fetched amalgamation, which is sqlite.org's and compiled
+          # unchanged, is not analysed.
+          - language: c-cpp
+            build-mode: none
+            runner: ubuntu-24.04
+          - language: java-kotlin
+            build-mode: manual
+            runner: ubuntu-24.04
+          - language: ruby
+            build-mode: none
+            runner: ubuntu-24.04
+          - language: swift
+            build-mode: manual
+            runner: macos-26
+    env:
+      # CocoaPods normalizes Unicode and refuses to run under a non-UTF-8 locale.
+      LANG: en_US.UTF-8
+      LC_ALL: en_US.UTF-8
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - if: matrix.language == 'swift'
+        uses: ruby/setup-ruby@de492cf36cbab201753d720ce4f4e336cd688c94 # v1.336.0
+        with:
+          # renovate: datasource=ruby-version depName=ruby-version
+          ruby-version: "4.0.9"
+          bundler-cache: true
+      - if: matrix.language == 'java-kotlin'
+        uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          # renovate: datasource=java-version depName=java-jdk
+          java-version: "21.0.13"
+      - if: matrix.language == 'java-kotlin'
+        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          # renovate: datasource=gradle-version depName=gradle
+          gradle-version: "9.8.2"
+      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          # The suite default setup's `extended` runs.
+          queries: security-extended
+          # The CodeQL bundle released with the pinned action. Left unset, the
+          # action picks a bundle at run time, so the analyzer could change
+          # without a change here.
+          tools: linked
+      - name: Build the pod
+        if: matrix.language == 'swift'
+        # The extractor sees only what the compiler is run on. Lint builds the
+        # pod from scratch in a directory of its own, as a consumer's Podfile
+        # would. --skip-tests leaves out the test spec, which test-ios builds
+        # and runs: under the extractor's tracing its simulator run failed
+        # after the build had succeeded, and the Swift that ships is the pod's.
+        # The amalgamation's warnings are dropped from the failure output so
+        # the error is not buried under them.
+        run: bundle exec pod lib lint --platforms=ios --allow-warnings --skip-tests --verbose >lint.log 2>&1 || { grep -v -- '- WARN  |' lint.log | tail -200; exit 1; }
+      - name: Compile the Kotlin
+        if: matrix.language == 'java-kotlin'
+        working-directory: android
+        # The extractor sees only a compiler running in the traced process: no
+        # Gradle daemon, no Kotlin daemon and no build cache, all of which
+        # would compile, or skip compiling, out of its sight.
+        run: >-
+          gradle --no-daemon --no-build-cache
+          -Pkotlin.compiler.execution.strategy=in-process
+          :curlewsqlite:compileDebugKotlin
+          :curlewsqlite:compileDebugUnitTestKotlin
+          :curlewsqlite:compileDebugAndroidTestKotlin
+      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          # Default setup's categories, so each language's results continue
+          # under the name they were first reported with.
+          category: /language:${{ matrix.language }}

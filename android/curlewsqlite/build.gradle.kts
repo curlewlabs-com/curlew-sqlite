@@ -18,7 +18,8 @@ val sqliteAndroidSha256 = "45982177674e6fde0f5ec5c9387335a1a5c3e351ee986cbb8a42f
 /**
  * Downloads [url] to [output] and fails unless its SHA-256 is [sha256], so no byte the pin
  * does not name reaches the linker or the package. A cached file is re-verified rather
- * than trusted.
+ * than trusted. Given [localCopy], it reads that file in place of the download and
+ * verifies it the same way.
  */
 abstract class FetchVerifiedFile : DefaultTask() {
     @get:Input
@@ -26,6 +27,11 @@ abstract class FetchVerifiedFile : DefaultTask() {
 
     @get:Input
     abstract val sha256: Property<String>
+
+    @get:InputFile
+    @get:Optional
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val localCopy: RegularFileProperty
 
     @get:OutputFile
     abstract val output: RegularFileProperty
@@ -37,16 +43,18 @@ abstract class FetchVerifiedFile : DefaultTask() {
             logger.lifecycle("fetchSqliteAndroid: ${target.name} already verified")
             return
         }
-        val bytes = download(url.get())
+        val source = localCopy.orNull?.asFile
+        val origin = source?.path ?: url.get()
+        val bytes = source?.readBytes() ?: download(url.get())
         val actual = digest(bytes)
         if (actual != sha256.get()) {
             throw GradleException(
-                "fetchSqliteAndroid: ${url.get()} has SHA-256 $actual, pinned ${sha256.get()}",
+                "fetchSqliteAndroid: $origin has SHA-256 $actual, pinned ${sha256.get()}",
             )
         }
         target.parentFile.mkdirs()
         target.writeBytes(bytes)
-        logger.lifecycle("fetchSqliteAndroid: verified ${sha256.get()} for ${url.get()}")
+        logger.lifecycle("fetchSqliteAndroid: verified ${sha256.get()} for $origin")
     }
 
     // sqlite.org is one host behind a CDN, so a dropped connection or a server error is
@@ -78,6 +86,11 @@ val fetchSqliteAndroid =
     tasks.register<FetchVerifiedFile>("fetchSqliteAndroid") {
         url.set(sqliteAndroidUrl)
         sha256.set(sqliteAndroidSha256)
+        // A build that runs offline, or fetches its inputs itself, names its own copy of
+        // the pinned AAR here. It is verified against the same SHA-256 as a download.
+        localCopy.fileProvider(
+            providers.gradleProperty("curlewsqlite.sqliteAndroidAar").map { file(it) },
+        )
         output.set(layout.buildDirectory.file("sqlite-android/${sqliteAndroidUrl.substringAfterLast('/')}"))
     }
 

@@ -20,7 +20,7 @@ moving the pin to the release that carries SQLite's fix.
 The build trusts sqlite.org for the two archives it pins, and nothing else: each
 download is refused unless its SHA-256 is the pinned one, so a changed or
 substituted archive fails the build rather than reaching the compiler or the
-package.
+package. A local copy handed in for an offline build is held to the same check.
 
 The bindings are a thin layer over SQLite's C API, and they keep its contract.
 Handles are raw pointers. Passing a closed or finalized handle back is a

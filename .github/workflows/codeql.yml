@@ -91,6 +91,10 @@ jobs:
           build-mode: ${{ matrix.build-mode }}
           # The suite default setup's `extended` runs.
           queries: security-extended
+          # The CodeQL bundle released with the pinned action. Left unset, the
+          # action picks a bundle at run time, so the analyzer could change
+          # without a change here.
+          tools: linked
       - name: Build the pod
         if: matrix.language == 'swift'
         # The extractor sees only what the compiler is run on. Lint builds the

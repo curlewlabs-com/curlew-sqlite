@@ -14,7 +14,7 @@ amalgamation = sqlite_archive.fetch("strip_prefix")
 
 Pod::Spec.new do |spec|
   spec.name = "CurlewSQLite"
-  spec.version = "0.1.0"
+  spec.version = "0.2.0"
   spec.summary = "The official SQLite amalgamation at one pinned release, with a C shim and a runtime identity check."
   spec.homepage = "https://github.com/curlewlabs-com/curlew-sqlite"
   spec.license = { type: "MIT OR Apache-2.0", file: "LICENSE-MIT" }

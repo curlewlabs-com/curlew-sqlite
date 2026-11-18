@@ -63,6 +63,12 @@ gradle :curlewsqlite:assembleRelease :curlewsqlite:testDebugUnitTest
 gradle :curlewsqlite:connectedDebugAndroidTest   # with an emulator or device attached
 ```
 
+Both platforms' pins, from the repository root:
+
+```sh
+sh scripts/check-pins.sh
+```
+
 ## Releasing
 
 A release is a fixed `vMAJOR.MINOR.PATCH` tag on a `main` commit and the

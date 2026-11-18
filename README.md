@@ -70,7 +70,7 @@ other.
 ### iOS (CocoaPods)
 
 ```ruby
-pod 'CurlewSQLite', :git => 'https://github.com/curlewlabs-com/curlew-sqlite.git', :tag => 'v0.1.0'
+pod 'CurlewSQLite', :git => 'https://github.com/curlewlabs-com/curlew-sqlite.git', :tag => 'v0.2.0'
 ```
 
 CocoaPods checks out the tag, then the pod's `prepare_command` runs
@@ -79,6 +79,11 @@ the pinned zip from sqlite.org, verifies its SHA-256, and extracts `sqlite3.c`
 and `sqlite3.h`. The pod supports iOS 15.6 and later. It is compiled with
 `SQLITE_THREADSAFE=1`, `SQLITE_ENABLE_LOCKING_STYLE=0` (POSIX advisory locks in
 the app sandbox) and `HAVE_USLEEP=1`.
+
+A build that runs offline, or fetches its own inputs, sets
+`CURLEW_SQLITE_AMALGAMATION_ZIP` to a local copy of the pinned zip in the
+environment `pod install` runs in. The script then uses that file instead of
+downloading, and refuses it on the same SHA-256 check.
 
 SwiftPM is not provided. The pod is the only iOS packaging.
 
@@ -141,6 +146,12 @@ packages only the AAR's native engine: the AOSP Java bindings never reach your
 classpath. Do not also depend on that AAR yourself: both would supply
 `libsqliteX.so` for each ABI.
 
+A build that runs offline, or fetches its own inputs, passes a local copy of
+the pinned AAR as the Gradle property `curlewsqlite.sqliteAndroidAar`, for
+example `-Pcurlewsqlite.sqliteAndroidAar=/path/to/sqlite-android-3540100.aar`.
+The module then reads that file instead of downloading, and refuses it on the
+same SHA-256 check.
+
 The module ships its own R8 keep rule, so you write none. If the binding class
 were renamed, the shim would abort at `System.loadLibrary` by design (see the
 comment at the top of `curlew_sqlite_jni.c`).
@@ -172,9 +183,10 @@ back is a use-after-free, not an exception, exactly as it is in C.
 - It exposes only the entrypoints listed in the shims. Anything else (blobs,
   doubles, busy handlers, user functions) needs a new shim function on both
   platforms.
-- It has no configuration. The compile definitions, the ABI set, the version
-  floor and the source ID all follow the pin. Using a different engine means a
-  different release of this repository, or a fork.
+- It has no configuration beyond where a pinned download is read from. The
+  compile definitions, the ABI set, the version floor and the source ID all
+  follow the pin. Using a different engine means a different release of this
+  repository, or a fork.
 - It provides no prebuilt binaries and no SwiftPM package.
 
 ## Known issues
@@ -205,6 +217,9 @@ Check each download against the SHA3-256 that
 [sqlite.org's download page](https://www.sqlite.org/download.html) publishes
 before recording its SHA-256. The tests on both platforms read the engine's
 reported version and source ID, so a pin moved without the constants fails CI.
+[`scripts/check-pins.sh`](scripts/check-pins.sh), which CI also runs, fails
+unless the two platforms name the same release: the archives' release numbers,
+the version floors and the source IDs.
 
 ## Releases
 

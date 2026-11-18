@@ -26,7 +26,9 @@ jobs:
     # `pod lib lint` fetches and verifies the pinned amalgamation through the
     # podspec's prepare_command, builds the pod, and runs its test spec on an
     # iOS simulator: once as a framework and once as a static library, the two
-    # ways a Podfile can link it.
+    # ways a Podfile can link it. The static-library run is handed a local copy
+    # of the amalgamation, so the offline input is proven through CocoaPods
+    # itself, and a copy with other bytes is shown to be refused.
     runs-on: macos-26
     timeout-minutes: 45
     env:
@@ -44,8 +46,33 @@ jobs:
           bundler-cache: true
       - name: Lint the pod and run its tests (framework)
         run: bundle exec pod lib lint --platforms=ios --allow-warnings --verbose >lint-framework.log 2>&1 || { tail -200 lint-framework.log; exit 1; }
-      - name: Lint the pod and run its tests (static library)
+      - name: Fetch a local copy of the pinned amalgamation
+        run: |
+          set -eu
+          url=$(jq -r .archive.url CurlewSQLite.lock.json)
+          curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
+            --retry-delay 2 --connect-timeout 20 --max-time 120 \
+            --output "$RUNNER_TEMP/amalgamation.zip" "$url"
+      - name: Lint the pod and run its tests (static library, from the local copy)
+        env:
+          CURLEW_SQLITE_AMALGAMATION_ZIP: ${{ runner.temp }}/amalgamation.zip
         run: bundle exec pod lib lint --platforms=ios --allow-warnings --use-libraries --verbose >lint-library.log 2>&1 || { tail -200 lint-library.log; exit 1; }
+      - name: Require that the local copy was used, and that other bytes are refused
+        run: |
+          set -eu
+          grep -F "fetch-amalgamation: using $RUNNER_TEMP/amalgamation.zip in place of" lint-library.log
+          cp "$RUNNER_TEMP/amalgamation.zip" "$RUNNER_TEMP/altered.zip"
+          printf x >>"$RUNNER_TEMP/altered.zip"
+          mkdir "$RUNNER_TEMP/refused"
+          cd "$RUNNER_TEMP/refused"
+          if CURLEW_SQLITE_AMALGAMATION_ZIP="$RUNNER_TEMP/altered.zip" sh "$GITHUB_WORKSPACE/ios/fetch-amalgamation.sh" \
+            "$(jq -r .archive.url "$GITHUB_WORKSPACE/CurlewSQLite.lock.json")" \
+            "$(jq -r .archive.sha256 "$GITHUB_WORKSPACE/CurlewSQLite.lock.json")" \
+            "$(jq -r .archive.strip_prefix "$GITHUB_WORKSPACE/CurlewSQLite.lock.json")"; then
+            echo "::error::an altered local copy was accepted"
+            exit 1
+          fi
+          test -z "$(ls -A)"
       - name: Require that the tests ran and that only the amalgamation warned
         run: |
           set -eu
@@ -85,6 +112,29 @@ jobs:
       - name: Build, and run the JVM tests
         working-directory: android
         run: gradle --no-daemon :curlewsqlite:assembleRelease :curlewsqlite:testDebugUnitTest
+      - name: Require a local copy of the AAR to be used, and other bytes refused
+        # The build above downloaded and verified the AAR. A copy of it, handed
+        # back through the property with the network off, must be accepted, and
+        # the same copy with one byte more must be refused.
+        working-directory: android
+        run: |
+          set -eu
+          aar=$(echo curlewsqlite/build/sqlite-android/*.aar)
+          test -f "$aar"
+          cp "$aar" "$RUNNER_TEMP/copy.aar"
+          cp "$aar" "$RUNNER_TEMP/altered.aar"
+          printf x >>"$RUNNER_TEMP/altered.aar"
+          rm "$aar"
+          gradle --no-daemon --offline :curlewsqlite:fetchSqliteAndroid \
+            "-Pcurlewsqlite.sqliteAndroidAar=$RUNNER_TEMP/copy.aar" | tee fetch.log
+          grep -F "fetchSqliteAndroid: verified" fetch.log | grep -F "for $RUNNER_TEMP/copy.aar"
+          rm "$aar"
+          if gradle --no-daemon --offline :curlewsqlite:fetchSqliteAndroid \
+            "-Pcurlewsqlite.sqliteAndroidAar=$RUNNER_TEMP/altered.aar"; then
+            echo "::error::an altered local copy was accepted"
+            exit 1
+          fi
+          test ! -e "$aar"
       - name: Give the runner user the KVM device
         # The emulator needs hardware acceleration, and the hosted image leaves
         # /dev/kvm to root.
@@ -114,6 +164,18 @@ jobs:
             exit 1
           fi
 
+  test-pins:
+    # The two platforms pin their engines in separate files, and each one's
+    # tests check only its own constants.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Require the iOS and Android pins to name one release
+        run: sh scripts/check-pins.sh
+
   baseline:
     # The checks every Curlew Labs repository runs, in one place:
     # https://github.com/curlewlabs-com/ci-baseline
@@ -126,7 +188,7 @@ jobs:
       - uses: curlewlabs-com/ci-baseline@f05f17a38ba2dfbaf0cde130a375b346e9a923a2 # v0.2.0
 
   conclusion:
-    needs: [test-ios, test-android, baseline]
+    needs: [test-ios, test-android, test-pins, baseline]
     runs-on: ubuntu-24.04
     if: always()
     steps:
@@ -134,5 +196,6 @@ jobs:
         env:
           TEST_IOS: ${{ needs.test-ios.result }}
           TEST_ANDROID: ${{ needs.test-android.result }}
+          TEST_PINS: ${{ needs.test-pins.result }}
           BASELINE: ${{ needs.baseline.result }}
-        run: test "$TEST_IOS" = success && test "$TEST_ANDROID" = success && test "$BASELINE" = success
+        run: test "$TEST_IOS" = success && test "$TEST_ANDROID" = success && test "$TEST_PINS" = success && test "$BASELINE" = success

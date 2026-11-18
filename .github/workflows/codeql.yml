@@ -91,12 +91,16 @@ jobs:
           build-mode: ${{ matrix.build-mode }}
           # The suite default setup's `extended` runs.
           queries: security-extended
-      - name: Build the pod and its tests
+      - name: Build the pod
         if: matrix.language == 'swift'
         # The extractor sees only what the compiler is run on. Lint builds the
-        # pod and its test spec from scratch in a directory of its own, as a
-        # consumer's Podfile would.
-        run: bundle exec pod lib lint --platforms=ios --allow-warnings --verbose >lint.log 2>&1 || { tail -200 lint.log; exit 1; }
+        # pod from scratch in a directory of its own, as a consumer's Podfile
+        # would. --skip-tests leaves out the test spec, which test-ios builds
+        # and runs: under the extractor's tracing its simulator run failed
+        # after the build had succeeded, and the Swift that ships is the pod's.
+        # The amalgamation's warnings are dropped from the failure output so
+        # the error is not buried under them.
+        run: bundle exec pod lib lint --platforms=ios --allow-warnings --skip-tests --verbose >lint.log 2>&1 || { grep -v -- '- WARN  |' lint.log | tail -200; exit 1; }
       - name: Compile the Kotlin
         if: matrix.language == 'java-kotlin'
         working-directory: android

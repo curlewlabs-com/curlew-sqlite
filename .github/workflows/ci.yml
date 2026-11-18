@@ -40,7 +40,7 @@ jobs:
       - uses: ruby/setup-ruby@de492cf36cbab201753d720ce4f4e336cd688c94 # v1.336.0
         with:
           # renovate: datasource=ruby-version depName=ruby-version
-          ruby-version: "3.3.13"
+          ruby-version: "3.4.12"
           bundler-cache: true
       - name: Lint the pod and run its tests (framework)
         run: bundle exec pod lib lint --platforms=ios --allow-warnings --verbose >lint-framework.log 2>&1 || { tail -200 lint-framework.log; exit 1; }

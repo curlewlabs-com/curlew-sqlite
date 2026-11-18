@@ -10,6 +10,13 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    # Named, so every step runs as `bash -eo pipefail`: with the shell left
+    # unset, a pipeline's status is its last command's, and a failed grep
+    # ahead of a tail would pass.
+    shell: bash
+
 concurrency:
   group: ci-${{ github.ref }}-${{ github.ref_name == 'main' && github.run_id || 'pr' }}
   cancel-in-progress: ${{ github.ref_name != 'main' }}
@@ -43,8 +50,8 @@ jobs:
         run: |
           set -eu
           for log in lint-framework.log lint-library.log; do
-            # A lint that skipped the test spec passes too, so the run is read
-            # back from xcodebuild's own summary.
+            # Lint's exit status does not show that the test spec ran, so the
+            # run is read back from xcodebuild's own summary.
             grep -E 'Executed [1-9][0-9]* tests?, with 0 failures' "$log" | tail -1
           done
           # --allow-warnings is there for sqlite3.c, which is upstream's and is
@@ -95,8 +102,8 @@ jobs:
           working-directory: android
           script: gradle --no-daemon :curlewsqlite:connectedDebugAndroidTest
       - name: Require that the instrumented tests ran
-        # Gradle passes a connected run that found no test, so the count is read
-        # back from its report.
+        # So that a run which executed no test cannot pass, the count is read
+        # back from the report Gradle writes.
         run: |
           set -eu
           counts=$(find android/curlewsqlite/build/outputs/androidTest-results/connected \

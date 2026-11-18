@@ -60,8 +60,8 @@ the pinned value, and also requires a minimum version. Run it on every open,
 before touching any table. A mismatch is a hard failure: there is no fallback to
 the OS engine.
 
-The C entrypoints are the same on both platforms. The only addition is
-`sqlite3_column_bytes` on Android, which is needed to build a JVM byte array.
+The binding's entrypoints are the same on both platforms: each of the 16
+`curlew_sqlite3_*` functions on iOS has one Kotlin `native*` method on Android.
 That keeps storage code written against one platform readable against the
 other.
 
@@ -96,10 +96,17 @@ try CurlewSQLiteProviderIdentity.validateRuntimeIdentity(version: version, sourc
 ```
 
 Call the `curlew_sqlite3_*` functions rather than the bare `sqlite3_*` names.
-Those names exist only in this pod, so a call to one cannot bind to the OS's
-`libsqlite3`, even in an app that links it too. `sqlite3.h` is public for its
-constants and types. The full list of functions is
-in [`ios/CurlewSQLiteShim.h`](ios/CurlewSQLiteShim.h).
+Those names exist only in this pod, so your code's calls always reach the pod.
+`sqlite3.h` is public for its constants and types. The full list of functions
+is in [`ios/CurlewSQLiteShim.h`](ios/CurlewSQLiteShim.h).
+
+Link the pod as a framework (`use_frameworks!`, either linkage) if your app
+also links the OS's `libsqlite3`, directly or through another pod. In a
+framework, the shim's own `sqlite3_*` calls bind to the bundled engine when the
+framework itself is linked. As a plain static library they bind only when your
+app is linked, and a `-lsqlite3` ahead of the pod sends them to the OS library
+instead. The identity check refuses that engine on the first open unless it
+reports the pinned source ID. See [Known issues](#known-issues).
 
 Every process that opens a database (an app extension, for example) should run
 the check on its own connection. Each process loads the engine separately, so a
@@ -168,6 +175,16 @@ back is a use-after-free, not an exception, exactly as it is in C.
   floor and the source ID all follow the pin. Using a different engine means a
   different release of this repository, or a fork.
 - It provides no prebuilt binaries and no SwiftPM package.
+
+## Known issues
+
+- **Static-library linking next to the OS SQLite.** Built without
+  `use_frameworks!`, the pod is a static library, and the shim's references to
+  `sqlite3_*` are resolved at the app's link in library search order. An app
+  that links `/usr/lib/libsqlite3.dylib` ahead of the pod gets the OS engine
+  behind the shim. The identity check refuses that engine unless it reports the
+  pinned source ID, so the database does not open rather than open on the wrong
+  engine. Link the pod as a framework in such an app.
 
 ## Moving the engine
 

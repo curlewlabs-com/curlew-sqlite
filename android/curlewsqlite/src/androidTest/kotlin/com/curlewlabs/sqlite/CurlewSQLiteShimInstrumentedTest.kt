@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -121,6 +122,43 @@ class CurlewSQLiteShimInstrumentedTest {
             assertNull(CurlewSQLite.columnText(read, 0))
             assertEquals(CurlewSQLite.ROW, CurlewSQLite.nativeStep(read))
             assertEquals("", CurlewSQLite.columnText(read, 0))
+            assertEquals(CurlewSQLite.OK, CurlewSQLite.nativeFinalize(read))
+        } finally {
+            assertEquals(CurlewSQLite.OK, CurlewSQLite.nativeCloseV2(database))
+        }
+    }
+
+    /**
+     * A bound SQL NULL must be distinguishable from a stored integer zero: nativeColumnInt64
+     * answers 0 for both, so [CurlewSQLite.isNull] (nativeColumnType underneath) is the only
+     * thing that tells them apart. Both values go in through the binding, not as SQL
+     * literals, so nativeBindNull is the call under test.
+     */
+    @Test
+    fun aBoundNullIsDistinguishableFromAStoredZero() {
+        val database = openProbeDatabase()
+        try {
+            execute(database, "CREATE TABLE probe (id INTEGER PRIMARY KEY, n INTEGER) STRICT")
+            val insert = prepare(database, "INSERT INTO probe (id, n) VALUES (?, ?)")
+            assertEquals(CurlewSQLite.OK, CurlewSQLite.nativeBindInt64(insert, 1, 1L))
+            assertEquals(CurlewSQLite.OK, CurlewSQLite.nativeBindNull(insert, 2))
+            assertEquals(CurlewSQLite.DONE, CurlewSQLite.nativeStep(insert))
+            assertEquals(CurlewSQLite.OK, CurlewSQLite.nativeFinalize(insert))
+
+            val zero = prepare(database, "INSERT INTO probe (id, n) VALUES (?, ?)")
+            assertEquals(CurlewSQLite.OK, CurlewSQLite.nativeBindInt64(zero, 1, 2L))
+            assertEquals(CurlewSQLite.OK, CurlewSQLite.nativeBindInt64(zero, 2, 0L))
+            assertEquals(CurlewSQLite.DONE, CurlewSQLite.nativeStep(zero))
+            assertEquals(CurlewSQLite.OK, CurlewSQLite.nativeFinalize(zero))
+
+            val read = prepare(database, "SELECT n FROM probe ORDER BY id")
+            assertEquals(CurlewSQLite.ROW, CurlewSQLite.nativeStep(read))
+            assertTrue(CurlewSQLite.isNull(read, 0))
+            assertEquals(0L, CurlewSQLite.nativeColumnInt64(read, 0))
+            assertEquals(CurlewSQLite.ROW, CurlewSQLite.nativeStep(read))
+            assertFalse(CurlewSQLite.isNull(read, 0))
+            assertEquals(0L, CurlewSQLite.nativeColumnInt64(read, 0))
+            assertEquals(CurlewSQLite.DONE, CurlewSQLite.nativeStep(read))
             assertEquals(CurlewSQLite.OK, CurlewSQLite.nativeFinalize(read))
         } finally {
             assertEquals(CurlewSQLite.OK, CurlewSQLite.nativeCloseV2(database))

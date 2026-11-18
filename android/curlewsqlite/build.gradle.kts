@@ -50,12 +50,17 @@ abstract class FetchVerifiedFile : DefaultTask() {
     }
 
     // sqlite.org is one host behind a CDN, so a dropped connection or a server error is
-    // worth a bounded retry. A wrong digest is never retried.
+    // worth a bounded retry. A wrong digest is never retried. The timeouts bound each
+    // attempt, so a stalled transfer fails into the next one instead of hanging the build;
+    // unset, both are infinite.
     private fun download(source: String): ByteArray {
         var lastFailure: IOException? = null
         for (attempt in 1..3) {
             try {
-                return URI(source).toURL().openStream().use { it.readBytes() }
+                val connection = URI(source).toURL().openConnection()
+                connection.connectTimeout = 20_000
+                connection.readTimeout = 60_000
+                return connection.getInputStream().use { it.readBytes() }
             } catch (failure: IOException) {
                 lastFailure = failure
                 logger.warn("fetchSqliteAndroid: attempt $attempt of 3 failed for $source", failure)

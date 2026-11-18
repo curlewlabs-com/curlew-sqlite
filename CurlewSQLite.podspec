@@ -4,8 +4,8 @@
 
 require 'json'
 
-# The pin is JSON rather than Ruby so a tool that does not evaluate a podspec
-# can read the same archive, digest and compile definitions this pod uses.
+# The pin is plain JSON so the archive, its digest and the compile definitions
+# can be read and updated without evaluating this Ruby.
 sqlite_pin = JSON.parse(File.read(File.join(__dir__, 'CurlewSQLite.lock.json')))
 sqlite_archive = sqlite_pin.fetch('archive')
 amalgamation = sqlite_archive.fetch('strip_prefix')

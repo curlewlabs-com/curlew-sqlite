@@ -67,6 +67,17 @@ static jbyteArray toByteArray(JNIEnv *env, const void *bytes, jsize length) {
     return array;
 }
 
+// Zeroes the caller's output slot before anything can fail, so every return path leaves
+// either the new handle or 0 there and never a handle from an earlier call. A caller that
+// reuses one array across calls would otherwise close or finalize that stale handle a
+// second time on a failed allocation. Returns false with a pending exception when the
+// array has no slot, which the caller propagates.
+static int clearHandle(JNIEnv *env, jlongArray out) {
+    jlong none = 0;
+    (*env)->SetLongArrayRegion(env, out, 0, 1, &none);
+    return !(*env)->ExceptionCheck(env);
+}
+
 static jint openV2(
     JNIEnv *env,
     jobject thiz,
@@ -74,6 +85,9 @@ static jint openV2(
     jint flags,
     jlongArray outHandle) {
     (void) thiz;
+    if (!clearHandle(env, outHandle)) {
+        return SQLITE_MISUSE;
+    }
     jsize length = (*env)->GetArrayLength(env, pathUtf8);
     // sqlite3_open_v2 takes a NUL-terminated path; the JVM array is not.
     char *path = malloc((size_t) length + 1);
@@ -129,6 +143,9 @@ static jint prepareV2(
     jbyteArray sqlUtf8,
     jlongArray outStatement) {
     (void) thiz;
+    if (!clearHandle(env, outStatement)) {
+        return SQLITE_MISUSE;
+    }
     jsize length = (*env)->GetArrayLength(env, sqlUtf8);
     char *sql = malloc((size_t) length + 1);
     if (sql == NULL) {

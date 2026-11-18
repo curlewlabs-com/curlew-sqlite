@@ -8,6 +8,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -160,6 +161,26 @@ class CurlewSQLiteShimInstrumentedTest {
             assertEquals(0L, CurlewSQLite.nativeColumnInt64(read, 0))
             assertEquals(CurlewSQLite.DONE, CurlewSQLite.nativeStep(read))
             assertEquals(CurlewSQLite.OK, CurlewSQLite.nativeFinalize(read))
+        } finally {
+            assertEquals(CurlewSQLite.OK, CurlewSQLite.nativeCloseV2(database))
+        }
+    }
+
+    /**
+     * An output array with no slot surfaces as the JVM's own exception before the shim
+     * opens or prepares anything, so nothing is created that the caller could not be
+     * handed back and would leak.
+     */
+    @Test
+    fun anOutputArrayWithNoSlotThrowsBeforeAnythingIsCreated() {
+        val database = openProbeDatabase()
+        try {
+            assertThrows(ArrayIndexOutOfBoundsException::class.java) {
+                CurlewSQLite.prepareV2(database, "SELECT 1", LongArray(0))
+            }
+            assertThrows(ArrayIndexOutOfBoundsException::class.java) {
+                CurlewSQLite.openV2(databaseFile.absolutePath, CurlewSQLite.OPEN_READWRITE, LongArray(0))
+            }
         } finally {
             assertEquals(CurlewSQLite.OK, CurlewSQLite.nativeCloseV2(database))
         }

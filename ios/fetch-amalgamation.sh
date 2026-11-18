@@ -19,12 +19,13 @@ directory=$3
 archive="$directory.zip"
 
 echo "fetch-amalgamation: downloading $url"
-# sqlite.org is one host behind a CDN; a dropped connection or a 5xx is worth
-# a retry, a 404 is not and fails at once. Each attempt has its own deadline,
-# so a stalled transfer fails into the next attempt instead of hanging the
-# install. The archive is under 3 MB.
-curl --fail --silent --show-error --location --retry 3 --retry-delay 2 \
-    --connect-timeout 20 --max-time 120 \
+# sqlite.org is one host behind a CDN, so every failed attempt is retried: a
+# refused or reset connection as much as a 5xx. curl's plain --retry skips the
+# first two, and a 404 retried costs seconds. A digest mismatch below is never
+# retried. Each attempt has its own deadline, so a stalled transfer fails into
+# the next attempt instead of hanging the install. The archive is under 3 MB.
+curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
+    --retry-delay 2 --connect-timeout 20 --max-time 120 \
     --output "$archive" "$url"
 
 if ! printf '%s  %s\n' "$sha256" "$archive" | shasum -a 256 -c - >/dev/null; then

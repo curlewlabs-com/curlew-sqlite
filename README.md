@@ -100,12 +100,13 @@ Those names exist only in this pod, so your code's calls always reach the pod.
 `sqlite3.h` is public for its constants and types. The full list of functions
 is in [`ios/CurlewSQLiteShim.h`](ios/CurlewSQLiteShim.h).
 
-Link the pod as a framework (`use_frameworks!`, either linkage) if your app
-also links the OS's `libsqlite3`, directly or through another pod. In a
-framework, the shim's own `sqlite3_*` calls bind to the bundled engine when the
-framework itself is linked. As a plain static library they bind only when your
-app is linked, and a `-lsqlite3` ahead of the pod sends them to the OS library
-instead. The identity check refuses that engine on the first open unless it
+Link the pod as a dynamic framework (`use_frameworks!`, whose default linkage
+is dynamic) if your app also links the OS's `libsqlite3`, directly or through
+another pod. In a dynamic framework, the shim's own `sqlite3_*` calls bind to
+the bundled engine when the framework itself is linked. As a static library or
+a static framework (`use_frameworks! :linkage => :static`) they bind only when
+your app is linked, and a `-lsqlite3` ahead of the pod sends them to the OS
+library instead. The identity check refuses that engine on the first open unless it
 reports the pinned source ID. See [Known issues](#known-issues).
 
 Every process that opens a database (an app extension, for example) should run
@@ -178,13 +179,14 @@ back is a use-after-free, not an exception, exactly as it is in C.
 
 ## Known issues
 
-- **Static-library linking next to the OS SQLite.** Built without
-  `use_frameworks!`, the pod is a static library, and the shim's references to
-  `sqlite3_*` are resolved at the app's link in library search order. An app
+- **Static linking next to the OS SQLite.** Built as a static library (no
+  `use_frameworks!`) or a static framework (`:linkage => :static`), the pod is
+  an archive, and the shim's references to `sqlite3_*` are resolved at the
+  app's link in library search order. An app
   that links `/usr/lib/libsqlite3.dylib` ahead of the pod gets the OS engine
   behind the shim. The identity check refuses that engine unless it reports the
   pinned source ID, so the database does not open rather than open on the wrong
-  engine. Link the pod as a framework in such an app.
+  engine. Link the pod as a dynamic framework in such an app.
 
 ## Moving the engine
 

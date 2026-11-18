@@ -1,0 +1,62 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+
+jobs:
+  reviewed-source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require a commit already merged to main
+        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+      - name: Require the podspec to name the tag's version
+        # The podspec's source names the tag from spec.version, so a tag the
+        # podspec does not name would publish a pod reporting another release.
+        env:
+          TAG: ${{ github.ref_name }}
+        run: grep -F -x "  spec.version = '${TAG#v}'" CurlewSQLite.podspec
+
+  verify:
+    needs: reviewed-source
+    uses: ./.github/workflows/ci.yml
+
+  # Drafts the release with its archive. Publishing the draft, which makes the
+  # tag and the archive immutable, stays a maintainer's separate step.
+  draft:
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build the archive
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -eu
+          version=${TAG#v}
+          mkdir dist
+          git archive --format=tar.gz --prefix="curlew-sqlite-${version}/" \
+            -o "dist/curlew-sqlite-${version}.tar.gz" "$TAG"
+          (cd dist && sha256sum ./*.tar.gz >SHA256SUMS)
+          cat dist/SHA256SUMS
+      - name: Draft the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" --draft --verify-tag --title "$TAG" \
+            --notes "See the README for usage. SHA256SUMS lists the archive's digest." \
+            dist/*.tar.gz dist/SHA256SUMS

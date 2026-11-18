@@ -1,0 +1,138 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    # Named, so every step runs as `bash -eo pipefail`: with the shell left
+    # unset, a pipeline's status is its last command's, and a failed grep
+    # ahead of a tail would pass.
+    shell: bash
+
+concurrency:
+  group: ci-${{ github.ref }}-${{ github.ref_name == 'main' && github.run_id || 'pr' }}
+  cancel-in-progress: ${{ github.ref_name != 'main' }}
+
+jobs:
+  test-ios:
+    # `pod lib lint` fetches and verifies the pinned amalgamation through the
+    # podspec's prepare_command, builds the pod, and runs its test spec on an
+    # iOS simulator: once as a framework and once as a static library, the two
+    # ways a Podfile can link it.
+    runs-on: macos-26
+    timeout-minutes: 45
+    env:
+      # CocoaPods normalizes Unicode and refuses to run under a non-UTF-8 locale.
+      LANG: en_US.UTF-8
+      LC_ALL: en_US.UTF-8
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ruby/setup-ruby@de492cf36cbab201753d720ce4f4e336cd688c94 # v1.336.0
+        with:
+          # renovate: datasource=ruby-version depName=ruby-version
+          ruby-version: "3.3.13"
+          bundler-cache: true
+      - name: Lint the pod and run its tests (framework)
+        run: bundle exec pod lib lint --platforms=ios --allow-warnings --verbose >lint-framework.log 2>&1 || { tail -200 lint-framework.log; exit 1; }
+      - name: Lint the pod and run its tests (static library)
+        run: bundle exec pod lib lint --platforms=ios --allow-warnings --use-libraries --verbose >lint-library.log 2>&1 || { tail -200 lint-library.log; exit 1; }
+      - name: Require that the tests ran and that only the amalgamation warned
+        run: |
+          set -eu
+          for log in lint-framework.log lint-library.log; do
+            # Lint's exit status does not show that the test spec ran, so the
+            # run is read back from xcodebuild's own summary.
+            grep -E 'Executed [1-9][0-9]* tests?, with 0 failures' "$log" | tail -1
+          done
+          # --allow-warnings is there for sqlite3.c, which is upstream's and is
+          # compiled unchanged. A warning anywhere else still fails the job.
+          if grep -h -- '- WARN  |' lint-framework.log lint-library.log |
+            grep -v '/sqlite-amalgamation-[0-9]*/sqlite3\.c:'; then
+            echo "::error::a warning outside the SQLite amalgamation"
+            exit 1
+          fi
+
+  test-android:
+    # Builds the library with the pinned NDK for the four ABIs the engine AAR
+    # ships, runs the identity guards' JVM tests, then runs the shim's
+    # instrumented tests on an x86_64 emulator against the engine the build
+    # fetched and verified.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          # renovate: datasource=java-version depName=java-jdk
+          java-version: "21.0.13"
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          # renovate: datasource=gradle-version depName=gradle
+          gradle-version: "9.8.2"
+      - name: Build, and run the JVM tests
+        working-directory: android
+        run: gradle --no-daemon :curlewsqlite:assembleRelease :curlewsqlite:testDebugUnitTest
+      - name: Give the runner user the KVM device
+        # The emulator needs hardware acceleration, and the hosted image leaves
+        # /dev/kvm to root.
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' |
+            sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Run the instrumented tests on an emulator
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          working-directory: android
+          script: gradle --no-daemon :curlewsqlite:connectedDebugAndroidTest
+      - name: Require that the instrumented tests ran
+        # So that a run which executed no test cannot pass, the count is read
+        # back from the report Gradle writes.
+        run: |
+          set -eu
+          counts=$(find android/curlewsqlite/build/outputs/androidTest-results/connected \
+            -name 'TEST-*.xml' -exec grep -h -o 'tests="[0-9]*" failures="[0-9]*" errors="[0-9]*"' {} +)
+          echo "$counts"
+          test -n "$counts"
+          if echo "$counts" | grep -v -E 'tests="[1-9][0-9]*" failures="0" errors="0"'; then
+            exit 1
+          fi
+
+  baseline:
+    # The checks every Curlew Labs repository runs, in one place:
+    # https://github.com/curlewlabs-com/ci-baseline
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: curlewlabs-com/ci-baseline@f05f17a38ba2dfbaf0cde130a375b346e9a923a2 # v0.2.0
+
+  conclusion:
+    needs: [test-ios, test-android, baseline]
+    runs-on: ubuntu-24.04
+    if: always()
+    steps:
+      - name: Require every job to pass
+        env:
+          TEST_IOS: ${{ needs.test-ios.result }}
+          TEST_ANDROID: ${{ needs.test-android.result }}
+          BASELINE: ${{ needs.baseline.result }}
+        run: test "$TEST_IOS" = success && test "$TEST_ANDROID" = success && test "$BASELINE" = success
